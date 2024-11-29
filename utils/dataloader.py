@@ -28,7 +28,7 @@ class mri_dset(Dataset):
         path = subj['path_registered']
         
         img = self.input_transform(path)
-        return img, subj['age_at_scan'], subj['uid'], subj['guid']     
+        return img, subj['age_at_scan'], subj['uid'] , subj['guid']     
 
     def __len__(self):
         return len(self.df)

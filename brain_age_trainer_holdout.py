@@ -62,7 +62,7 @@ parser.add_argument('--input-csv', default='../brain_age/data/your_data.csv', he
 parser.add_argument('--output-dir', default='/path/to/brain_age/output_dir', help='Path to directory where output folder is created.')
 parser.add_argument('--evaluate-test-set', dest='evaluate_test_set', action='store_false',help='If you have images labeled "test" in you csv file and want evaluate it after training')
 parser.add_argument('--lr', '--learning-rate', default=0.002, type=float,metavar='LR', help='initial learning rate') 
-parser.add_argument('-bs', '--batch-size', default=20, type=int,metavar='N', help='mini-batch size (default: 20)')
+parser.add_argument('-bs', '--batch-size', default=7, type=int,metavar='N', help='mini-batch size (default: 20)')
 parser.add_argument('-epochs', default=20, type=int,metavar='N', help='mini-batch size (default: 20)')
 parser.add_argument('--comment', default='test_public_script', help='Add comment to training session for outputdir')
 parser.add_argument('--print-frequency', default=10, type=int, metavar='N',help='num batches to process before printing prediction error')
@@ -86,7 +86,7 @@ torch.random.manual_seed(0)
 #%% Create datasets and data loaders
 print('Creating dataset from %s' % args.input_csv)
 print('Images in column path_registered are assumed to have been registered ')
-df = pd.read_csv(args.input_csv,usecols=['uid','path_registered','age_at_scan','partition'])
+df = pd.read_csv(args.input_csv,usecols=['uid','path_registered','age_at_scan','partition', 'guid'])
 
 # transforms
 transforms_train = load_transforms(cfg,random_chance=.7)
@@ -137,7 +137,7 @@ if args.evaluate_test_set:
 
 #%% Test dset and dataloader, get img needed for initializing network
 index=0
-img,label,uid = dset_training.__getitem__(index)
+img,label,uid, guid = dset_training.__getitem__(index)
 for img_tmp in [img,]:
     ix=32
     plt.figure()
@@ -196,7 +196,7 @@ for epoch in range(args.epochs):
     print('--- starting training epoch ' + str(epoch) + ' ---')
     phase='train'
     start=time.time()
-    for i,(img,age,uid) in enumerate(loader_training):
+    for i,(img,age,uid, guid) in enumerate(loader_training):
         age=age.type(torch.FloatTensor).to(cfg['device'])
         # since dataloading is the bottleneck we train all models at once
         for key in models.keys():
@@ -210,7 +210,7 @@ for epoch in range(args.epochs):
             loss.backward()
     
             optimizers[key].step()
-            ratings[phase][key].update(tmp_pred.squeeze(),age,uid)
+            ratings[phase][key].update(tmp_pred.squeeze(),age,uid, guid)
             if i%args.print_frequency==0:
                 print([epoch,i,len(loader_training),key,loss.detach().to('cpu')])
 
@@ -218,14 +218,15 @@ for epoch in range(args.epochs):
     # -------------------------- evaulate dev set ----------------------
     phase='dev'
     with torch.no_grad():
-        for i,(img,age,uid) in enumerate(loader_dev):
+        for i,(img,age,uid, guid) in enumerate(loader_dev):
             
             age=age.type(torch.FloatTensor).to(cfg['device'])
             
             for key in models.keys():
                 models[key].eval()           
                 tmp_pred,_ = models[key](img.detach().to(cfg['device']))
-                ratings[phase][key].update(tmp_pred.squeeze_(1),age,uid)
+                ratings[phase][key].update(tmp_pred.squeeze_(1),age,uid, guid)
+                print(ratings[phase][key])
             
     print('finished epoch %d' % epoch) 
     #%%
@@ -234,18 +235,20 @@ for epoch in range(args.epochs):
         print('Evaluating test set')
         phase='test'
         with torch.no_grad():
-            for i,(img,age,uid) in enumerate(loader_test):
+            for i,(img,age,uid, guid) in enumerate(loader_test):
                 age=age.type(torch.FloatTensor).to(cfg['device'])                
                 for key in models.keys():
                     models[key].eval()                    
                     tmp_pred,_ = models[key](img.detach().to(cfg['device']))
-                    ratings[phase][key].update(tmp_pred.squeeze_(1),age,uid)
+                    ratings[phase][key].update(tmp_pred.squeeze_(1),age,uid, guid)
     #%% Compute epoch statistics and add to tensorboard summary writer
     
     maes=  {} # dictionary with MAE
     for phase in phases:
+        print(phase)
         predictions = [] # for calculating ensemble predictions
         for key in models.keys():
+            print(key)
             mae = ratings[phase][key].mae()
             maes[phase+'_'+key] = mae
             
